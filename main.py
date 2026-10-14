@@ -16,6 +16,11 @@ SKY = (135, 206, 235)
 GROUND = (90, 160, 70)
 DIRT = (120, 85, 55)
 PLAYER = (220, 60, 60)
+PLAYER_EDGE = (160, 35, 35)
+EYE_WHITE = (255, 255, 255)
+EYE_PUPIL = (20, 20, 20)
+MOUTH = (90, 20, 20)
+PLAYER_SIZE = 34  # the player is a circle; its collision box is the square around it
 DOOR = (150, 90, 40)
 DOOR_FRAME = (90, 50, 20)
 DOOR_KNOB = (240, 200, 60)
@@ -96,10 +101,11 @@ LEVELS = [
 class Player:
     def __init__(self, x, y):
         self.spawn = (x, y)
-        self.rect = pygame.Rect(x, y, 30, 38)
+        self.rect = pygame.Rect(x, y, PLAYER_SIZE, PLAYER_SIZE)
         self.vel_x = 0
         self.vel_y = 0
         self.on_ground = False
+        self.facing = 1  # 1 is right, -1 is left
 
     def respawn(self):
         self.rect.topleft = self.spawn
@@ -111,6 +117,8 @@ class Player:
             self.vel_x -= MOVE_SPEED
         if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
             self.vel_x += MOVE_SPEED
+        if self.vel_x:
+            self.facing = 1 if self.vel_x > 0 else -1
 
         # Move and resolve collisions one axis at a time.
         self.rect.x += self.vel_x
@@ -220,6 +228,26 @@ def draw_door(screen, door):
     pygame.draw.circle(screen, DOOR_KNOB, (door.right - 7, door.centery + 4), 3)
 
 
+def draw_player(screen, rect, facing):
+    cx, cy = rect.center
+    radius = rect.width // 2
+    pygame.draw.circle(screen, PLAYER_EDGE, (cx, cy), radius)
+    pygame.draw.circle(screen, PLAYER, (cx, cy), radius - 2)
+
+    # Eyes look the way the player is facing.
+    look = 2 * facing
+    for side in (-1, 1):
+        eye = (cx + side * 6 + facing * 2, cy - 4)
+        pygame.draw.circle(screen, EYE_WHITE, eye, 5)
+        pygame.draw.circle(screen, EYE_PUPIL, (eye[0] + look, eye[1]), 2)
+
+    # Smile: a short curve below the eyes.
+    # Screen y grows downwards, so the middle of the curve has the largest y.
+    mx, my = cx + facing * 2, cy + 4
+    smile = [(mx + x, my + (49 - x * x) // 12) for x in range(-7, 8)]
+    pygame.draw.lines(screen, MOUTH, False, smile, 2)
+
+
 def draw_coin(screen, center, radius=COIN_SIZE // 2):
     pygame.draw.circle(screen, COIN_EDGE, center, radius)
     pygame.draw.circle(screen, COIN, center, radius - 2)
@@ -284,7 +312,7 @@ def main():
             draw_door(screen, level.door.move(-cam_x, -cam_y))
         for coin in level.coins:
             draw_coin(screen, coin.move(-cam_x, -cam_y).center)
-        pygame.draw.rect(screen, PLAYER, player.rect.move(-cam_x, -cam_y), border_radius=6)
+        draw_player(screen, player.rect.move(-cam_x, -cam_y), player.facing)
 
         label = font.render(f"Level {game.level_index + 1}/{len(game.levels)}", True, TEXT)
         screen.blit(label, (16, 12))

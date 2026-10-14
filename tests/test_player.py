@@ -2,7 +2,7 @@ import pygame
 import pytest
 
 from conftest import LEFT, NO_KEYS, RIGHT, Keys
-from main import GRAVITY, MAX_FALL_SPEED, MOVE_SPEED, TILE, Level, Player
+from main import GRAVITY, MAX_FALL_SPEED, MOVE_SPEED, PLAYER_SIZE, TILE, Level, Player
 
 FLAT = [
     "..........",
@@ -142,6 +142,21 @@ def test_ceiling_stops_upward_movement():
         for _ in range(60):
             run(player, level)
             assert player.rect.top >= TILE
+
+
+def test_player_hitbox_is_square_to_match_its_circle(level):
+    player = Player(*level.start)
+    assert player.rect.width == player.rect.height == PLAYER_SIZE
+
+
+def test_player_faces_the_way_it_last_moved(grounded, level):
+    assert grounded.facing == 1
+    run(grounded, level, LEFT, frames=2)
+    assert grounded.facing == -1
+    run(grounded, level, frames=5)  # standing still keeps the last direction
+    assert grounded.facing == -1
+    run(grounded, level, RIGHT, frames=2)
+    assert grounded.facing == 1
 
 
 def test_respawn_returns_to_start_and_stops(level):
