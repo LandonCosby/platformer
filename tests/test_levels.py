@@ -1,9 +1,14 @@
 import pytest
 
-from main import LEVELS, MOVE_SPEED, TILE, WIDTH, Game, Level
+from game.game import Game
+from game.level import Level
+from game.levels import LEVELS
+from game.settings import MOVE_SPEED, TILE, WIDTH
 from reachability import (
     Surface,
     can_reach_door,
+    can_touch,
+    reachable_surfaces,
     find_surfaces,
     jump_arc,
     reach,
@@ -43,7 +48,8 @@ def test_levels_are_at_least_three_screens_long(layout):
 @pytest.mark.parametrize("layout", LEVELS, ids=LEVEL_IDS)
 def test_level_layout_is_well_formed(layout):
     text = "".join(layout)
-    assert set(text) <= set(".#PDCE"), "unknown character in layout"
+    assert set(text) <= set(".#PDCEK"), "unknown character in layout"
+    assert text.count("K") == 1, "needs exactly one checkpoint"
     assert text.count("C") >= 1, "every level should have at least one coin"
     assert text.count("P") == 1, "needs exactly one player start"
     assert text.count("D") == 1, "needs exactly one door"
@@ -74,6 +80,34 @@ def test_enemies_are_not_next_to_the_start(layout):
     start_col = text_rows[start_row]
     for r, c in enemy_cells(layout):
         assert abs(c - start_col) >= 5 or abs(r - start_row) >= 3
+
+
+def checkpoint_cell(layout):
+    return next((r, c) for r, line in enumerate(layout) for c, ch in enumerate(line) if ch == "K")
+
+
+@pytest.mark.parametrize("layout", LEVELS, ids=LEVEL_IDS)
+def test_checkpoint_is_about_halfway_and_on_the_ground(layout):
+    r, c = checkpoint_cell(layout)
+    assert 0.35 <= c / len(layout[0]) <= 0.65
+    assert layout[r + 1][c] == "#"
+
+
+@pytest.mark.parametrize("layout", LEVELS, ids=LEVEL_IDS)
+def test_checkpoint_can_be_reached(layout):
+    level, surfaces = reachable_surfaces(layout)
+    assert any(can_touch(s, level.checkpoint) for s in surfaces)
+
+
+@pytest.mark.parametrize("layout", LEVELS, ids=LEVEL_IDS)
+def test_checkpoint_is_not_on_an_enemy_patrol(layout):
+    # Respawning onto a patrolling enemy would be unfair: an enemy on the same row
+    # must have a gap in the ground between it and the flag.
+    flag_row, flag_col = checkpoint_cell(layout)
+    for r, c in enemy_cells(layout):
+        if r == flag_row:
+            ground_between = layout[r + 1][min(c, flag_col):max(c, flag_col) + 1]
+            assert "." in ground_between, f"the enemy at col {c} can walk to the checkpoint"
 
 
 @pytest.mark.parametrize("layout", LEVELS, ids=LEVEL_IDS)

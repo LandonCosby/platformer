@@ -4,7 +4,9 @@ import pygame
 import pytest
 
 from conftest import LEFT, NO_KEYS, RIGHT, Keys
-from main import (
+from game.level import Level
+from game.player import Player
+from game.settings import (
     ACCELERATION,
     AIR_CONTROL,
     GRAVITY,
@@ -13,8 +15,6 @@ from main import (
     PLAYER_SIZE,
     TILE,
     TURN_ACCELERATION,
-    Level,
-    Player,
 )
 
 FLAT = [

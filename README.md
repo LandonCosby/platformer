@@ -26,8 +26,23 @@ python main.py
 python -m pytest tests
 ```
 
-The tests check movement and physics, level progression and coins, and use a solver to confirm every level can be finished and every coin can be reached.
+The tests check movement and physics, health and enemies, level progression and coins, and use a graph of the platforms to confirm every level can be finished and every coin can be reached.
+
+## Code layout
+
+`main.py` starts the game. The game itself is in the `game` package:
+
+| File | What's in it |
+|---|---|
+| `settings.py` | Window size, physics, health, enemy settings, colours and controls |
+| `levels.py` | The level layouts |
+| `level.py` | `Level`: turns a layout into tiles, coins, enemies and a door |
+| `player.py` | `Player`: movement, acceleration, jumping and rolling |
+| `enemy.py` | `Enemy`: patrols a platform |
+| `game.py` | `Game`: the rules for coins, the door, health and enemies |
+| `drawing.py` | Drawing the player, enemies, coins, door, hearts and text |
+| `app.py` | The window, input, camera and main loop |
 
 ## Editing levels
 
-Levels are text grids in `LEVELS` in `main.py`: `#` is solid ground, `P` the player start, `D` the door, `C` a coin and `.` empty space.
+Levels are text grids in `LEVELS` in `game/levels.py`: `#` is solid ground, `P` the player start, `D` the door, `C` a coin, `E` an enemy, `K` the checkpoint flag and `.` empty space.

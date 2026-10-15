@@ -17,7 +17,9 @@ from typing import NamedTuple
 
 import pygame
 
-from main import MOVE_SPEED, PLAYER_SIZE, TILE, Level, Player
+from game.level import Level
+from game.player import Player
+from game.settings import MOVE_SPEED, PLAYER_SIZE, TILE
 
 
 class Surface(NamedTuple):

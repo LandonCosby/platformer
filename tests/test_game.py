@@ -2,8 +2,11 @@ import pygame
 import pytest
 
 from conftest import LEFT, NO_KEYS, RIGHT, Keys
-import main
-from main import ENEMY_WIDTH, LEVELS, TILE, Game, Level
+from game import app, settings
+from game.game import Game
+from game.level import Level
+from game.levels import LEVELS
+from game.settings import ENEMY_WIDTH, TILE
 
 # Small levels where walking right reaches the door quickly.
 SHORT = [
@@ -106,7 +109,7 @@ def test_player_cannot_leave_the_sides_of_the_level(keys, edge):
     else:
         assert game.player.rect.right == game.level.width
     # The edge stops the player like a wall: only a sliver of speed between frames.
-    assert abs(game.player.vel_x) <= 2 * main.ACCELERATION
+    assert abs(game.player.vel_x) <= 2 * settings.ACCELERATION
 
 
 def test_total_coins_counts_every_level():
@@ -175,13 +178,13 @@ def fall_into_pit(game):
     for _ in range(120):
         game.update(RIGHT)
         if game.player.rect.topleft == game.level.start and game.player.vel_y == 0:
-            if game.level is not level or game.health < main.MAX_HEALTH:
+            if game.level is not level or game.health < settings.MAX_HEALTH:
                 return
 
 
 def test_starts_with_full_health():
     game = Game([SHORT])
-    assert game.health == main.MAX_HEALTH == 3
+    assert game.health == settings.MAX_HEALTH == 3
     assert game.invincible == 0
 
 
@@ -189,7 +192,7 @@ def test_damage_takes_a_heart_and_makes_the_player_briefly_invincible():
     game = Game([SHORT])
     assert game.damage()
     assert game.health == 2
-    assert game.invincible == main.INVINCIBLE_FRAMES
+    assert game.invincible == settings.INVINCIBLE_FRAMES
 
 
 def test_no_damage_while_invincible():
@@ -202,7 +205,7 @@ def test_no_damage_while_invincible():
 def test_can_be_hurt_again_once_invincibility_wears_off():
     game = Game([[".........", ".P.......", "#########"]])
     game.damage()
-    for _ in range(main.INVINCIBLE_FRAMES):
+    for _ in range(settings.INVINCIBLE_FRAMES):
         game.update(NO_KEYS)
     assert game.invincible == 0
     assert game.damage()
@@ -235,7 +238,7 @@ def test_losing_every_heart_restarts_the_level():
     assert game.health == 1
     game.player.rect.x += 50  # somewhere other than the start
     game.damage(ignore_invincibility=True)
-    assert game.health == main.MAX_HEALTH
+    assert game.health == settings.MAX_HEALTH
     assert game.invincible == 0
     assert game.player.rect.topleft == game.level.start
 
@@ -257,7 +260,7 @@ def test_hearts_refill_on_the_next_level():
     game.damage()
     walk_right_until_level_changes(game)
     assert game.level_index == 1
-    assert game.health == main.MAX_HEALTH
+    assert game.health == settings.MAX_HEALTH
 
 
 def test_restart_after_winning_gives_full_health():
@@ -265,7 +268,7 @@ def test_restart_after_winning_gives_full_health():
     game.damage()
     walk_right_until_level_changes(game)
     game.restart()
-    assert game.health == main.MAX_HEALTH
+    assert game.health == settings.MAX_HEALTH
 
 
 ENEMY_AHEAD = [
@@ -293,14 +296,14 @@ def run_until(game, keys, done, frames=200):
 
 def test_enemy_hurts_when_touched_from_the_side():
     game = Game([ENEMY_AHEAD])
-    assert run_until(game, RIGHT, lambda: game.health < main.MAX_HEALTH)
+    assert run_until(game, RIGHT, lambda: game.health < settings.MAX_HEALTH)
     assert game.health == 2
     assert len(game.level.enemies) == 1  # the enemy survives
 
 
 def test_side_hit_knocks_the_player_away():
     game = Game([ENEMY_AHEAD])
-    run_until(game, RIGHT, lambda: game.health < main.MAX_HEALTH)
+    run_until(game, RIGHT, lambda: game.health < settings.MAX_HEALTH)
     assert game.player.vel_x < 0  # pushed back left, away from the enemy
     assert game.player.vel_y < 0  # with a small hop
     assert game.player.rect.centerx < game.level.enemies[0].rect.centerx
@@ -309,14 +312,14 @@ def test_side_hit_knocks_the_player_away():
 def test_landing_on_an_enemy_defeats_it_without_damage():
     game = Game([ENEMY_BELOW])
     assert run_until(game, NO_KEYS, lambda: not game.level.enemies)
-    assert game.health == main.MAX_HEALTH
-    assert game.player.vel_y == -main.STOMP_BOUNCE  # bounced up
+    assert game.health == settings.MAX_HEALTH
+    assert game.player.vel_y == -settings.STOMP_BOUNCE  # bounced up
 
 
 def test_holding_jump_bounces_higher_off_an_enemy():
     game = Game([ENEMY_BELOW])
     assert run_until(game, JUMP_HELD, lambda: not game.level.enemies)
-    assert game.player.vel_y == -main.JUMP_SPEED
+    assert game.player.vel_y == -settings.JUMP_SPEED
 
 
 def test_no_side_damage_while_invincible():
@@ -334,7 +337,7 @@ def test_enemy_taking_the_last_heart_restarts_the_level():
     game.invincible = 0
     first_try = game.level
     assert run_until(game, RIGHT, lambda: game.level is not first_try)
-    assert game.health == main.MAX_HEALTH
+    assert game.health == settings.MAX_HEALTH
     assert game.player.rect.topleft == game.level.start
 
 
@@ -376,6 +379,81 @@ def test_enemy_turns_at_walls():
     assert min(lefts) >= 2 * TILE and max(lefts) + ENEMY_WIDTH <= 7 * TILE
 
 
+#  start (P), checkpoint (K), then a pit to fall into after it
+WITH_CHECKPOINT = [
+    "..............",
+    ".P....K.......",
+    "#########...##",
+]
+#  a pit before the checkpoint, so falling happens before reaching it
+PIT_BEFORE_CHECKPOINT = [
+    "..............",
+    ".P.......K....",
+    "####...#######",
+]
+
+
+def walk_into_pit_after(game, frames=300):
+    """Hold right until the player falls in the pit and respawns."""
+    for _ in range(frames):
+        game.update(RIGHT)
+        if game.health < settings.MAX_HEALTH:
+            return
+
+
+def test_checkpoint_starts_unreached():
+    game = Game([WITH_CHECKPOINT])
+    assert not game.checkpoint_reached
+    assert game.player.spawn == game.level.start
+
+
+def test_touching_the_checkpoint_saves_it():
+    game = Game([WITH_CHECKPOINT])
+    assert run_until(game, RIGHT, lambda: game.checkpoint_reached)
+    assert game.player.spawn == game.level.checkpoint_spawn
+
+
+def test_falling_after_the_checkpoint_respawns_there():
+    game = Game([WITH_CHECKPOINT])
+    walk_into_pit_after(game)
+    assert game.checkpoint_reached
+    assert game.health == settings.MAX_HEALTH - 1  # still costs a heart
+    assert game.player.rect.topleft == game.level.checkpoint_spawn
+
+
+def test_falling_before_the_checkpoint_respawns_at_the_start():
+    game = Game([PIT_BEFORE_CHECKPOINT])
+    walk_into_pit_after(game)
+    assert not game.checkpoint_reached
+    assert game.player.rect.topleft == game.level.start
+
+
+def test_checkpoint_respawn_lands_on_the_ground():
+    game = Game([WITH_CHECKPOINT])
+    walk_into_pit_after(game)
+    for _ in range(30):
+        game.update(NO_KEYS)
+    assert game.player.on_ground
+    assert game.player.rect.colliderect(game.level.checkpoint)
+
+
+def test_losing_the_last_heart_restarts_from_the_start_not_the_checkpoint():
+    game = Game([WITH_CHECKPOINT])
+    run_until(game, RIGHT, lambda: game.checkpoint_reached)
+    game.damage(3)
+    assert not game.checkpoint_reached
+    assert game.player.rect.topleft == game.level.start
+    assert game.player.spawn == game.level.start
+
+
+def test_next_level_starts_without_the_checkpoint():
+    game = Game([[".........", ".P.K...D.", "#########"], WITH_CHECKPOINT])
+    walk_right_until_level_changes(game)
+    assert game.level_index == 1
+    assert not game.checkpoint_reached
+    assert game.player.spawn == game.level.start
+
+
 def test_jump_controls_reach_the_player():
     game = Game([SHORT])
     for _ in range(30):
@@ -383,7 +461,7 @@ def test_jump_controls_reach_the_player():
     game.jump_pressed()
     assert game.player.vel_y < 0
     game.jump_released()
-    assert game.player.vel_y > -main.JUMP_SPEED / 2
+    assert game.player.vel_y > -settings.JUMP_SPEED / 2
 
 
 def test_real_levels_are_used_by_default():
@@ -393,13 +471,13 @@ def test_real_levels_are_used_by_default():
 def test_game_window_runs_and_quits(monkeypatch):
     """Smoke test: the real main loop starts, draws every level and the win screen, and exits."""
     # Start each level on its door, so the loop moves through every level to the win screen.
-    original_init = main.Level.__init__
+    original_init = Level.__init__
 
     def start_on_door(self, layout):
         original_init(self, layout)
         self.start = self.door.topleft
 
-    monkeypatch.setattr(main.Level, "__init__", start_on_door)
+    monkeypatch.setattr(Level, "__init__", start_on_door)
     pygame.init()
     pygame.time.set_timer(pygame.QUIT, 500)
-    main.main()  # Returns once the timer's QUIT event arrives; main() also shuts pygame down.
+    app.main()  # Returns once the timer's QUIT event arrives; it also shuts pygame down.
