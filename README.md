@@ -40,7 +40,8 @@ The tests check movement and physics, health and enemies, level progression and 
 | `player.py` | `Player`: movement, acceleration, jumping and rolling |
 | `enemy.py` | `Enemy`: patrols a platform |
 | `game.py` | `Game`: the rules for coins, the door, health and enemies |
-| `drawing.py` | Drawing the player, enemies, coins, door, hearts and text |
+| `drawing.py` | Drawing the player, enemies, coins, door, tiles, hearts and text |
+| `background.py` | The sky gradient and the scrolling hills and clouds |
 | `app.py` | The window, input, camera and main loop |
 
 ## Editing levels

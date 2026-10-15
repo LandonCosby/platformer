@@ -6,6 +6,7 @@ import pygame
 WIDTH, HEIGHT = 960, 540
 FPS = 60
 TILE = 40
+CAMERA_EASE = 0.12  # the camera moves this fraction of the way to the player each frame
 
 # Player physics (pixels per frame)
 MOVE_SPEED = 5  # top running speed
@@ -19,8 +20,17 @@ MAX_FALL_SPEED = 18
 
 # Colours
 SKY = (135, 206, 235)
+SKY_TOP = (85, 155, 225)
+SKY_BOTTOM = (195, 228, 245)
+CLOUD = (255, 255, 255)
+FAR_HILLS = (150, 190, 215)
+NEAR_HILLS = (115, 175, 135)
 GROUND = (90, 160, 70)
-DIRT = (120, 85, 55)
+GROUND_LIGHT = (130, 195, 95)
+GROUND_DARK = (60, 120, 50)
+DIRT = (125, 88, 58)
+DIRT_LIGHT = (150, 110, 75)
+DIRT_DARK = (95, 65, 42)
 PLAYER = (220, 60, 60)
 PLAYER_EDGE = (160, 35, 35)
 EYE_WHITE = (255, 255, 255)
