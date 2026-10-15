@@ -1,8 +1,21 @@
+import math
+
 import pygame
 import pytest
 
 from conftest import LEFT, NO_KEYS, RIGHT, Keys
-from main import GRAVITY, MAX_FALL_SPEED, MOVE_SPEED, PLAYER_SIZE, TILE, Level, Player
+from main import (
+    ACCELERATION,
+    AIR_CONTROL,
+    GRAVITY,
+    MAX_FALL_SPEED,
+    MOVE_SPEED,
+    PLAYER_SIZE,
+    TILE,
+    TURN_ACCELERATION,
+    Level,
+    Player,
+)
 
 FLAT = [
     "..........",
@@ -75,7 +88,88 @@ def test_gravity_accelerates_falling_up_to_max_speed():
 def test_moves_left_and_right(grounded, level, keys, direction):
     x = grounded.rect.x
     run(grounded, level, keys, frames=10)
-    assert grounded.rect.x == x + direction * MOVE_SPEED * 10
+    assert (grounded.rect.x - x) * direction > 0
+    assert grounded.vel_x * direction > 0
+
+
+@pytest.fixture
+def long_floor():
+    """A level wide enough to reach top speed and slide to a stop without hitting anything."""
+    level = Level([
+        "." * 60,
+        "." * 30 + "P" + "." * 29,
+        "#" * 60,
+    ])
+    player = Player(*level.start)
+    run(player, level, frames=30)
+    return player, level
+
+
+def test_speeds_up_gradually(long_floor):
+    player, level = long_floor
+    speeds = []
+    for _ in range(5):
+        run(player, level, RIGHT)
+        speeds.append(player.vel_x)
+    assert speeds[0] == pytest.approx(ACCELERATION)
+    assert speeds == sorted(speeds)
+    assert speeds[-1] < MOVE_SPEED
+
+
+def test_reaches_and_holds_top_speed(long_floor):
+    player, level = long_floor
+    run(player, level, RIGHT, frames=60)
+    assert player.vel_x == MOVE_SPEED
+    x = player.rect.x
+    run(player, level, RIGHT, frames=10)
+    assert player.rect.x - x == MOVE_SPEED * 10
+
+
+def test_slides_to_a_stop_after_letting_go(long_floor):
+    player, level = long_floor
+    run(player, level, RIGHT, frames=60)
+    x = player.rect.x
+    run(player, level)
+    assert 0 < player.vel_x < MOVE_SPEED  # still moving, but slower
+    run(player, level, frames=60)
+    assert player.vel_x == 0
+    assert player.rect.x > x  # slid forward before stopping
+    stopped_at = player.rect.x
+    run(player, level, frames=10)
+    assert player.rect.x == stopped_at
+
+
+def test_turning_around_is_quicker_than_starting(long_floor):
+    player, level = long_floor
+    run(player, level, RIGHT, frames=60)
+    run(player, level, LEFT)
+    assert MOVE_SPEED - player.vel_x == pytest.approx(TURN_ACCELERATION)
+    assert TURN_ACCELERATION > ACCELERATION
+
+
+def test_less_control_in_the_air(long_floor):
+    player, level = long_floor
+    player.jump()
+    run(player, level, RIGHT)  # take-off frame still counts as on the ground
+    assert not player.on_ground
+    speed = player.vel_x
+    run(player, level, RIGHT)
+    assert player.vel_x - speed == pytest.approx(ACCELERATION * AIR_CONTROL)
+
+
+def test_hitting_a_wall_stops_horizontal_speed():
+    level = Level([
+        "......",
+        ".P..#.",
+        "######",
+    ])
+    player = Player(*level.start)
+    run(player, level, RIGHT, frames=60)
+    assert player.rect.right == 4 * TILE
+    # Pushing into the wall can only build a sliver of speed before it is stopped again.
+    assert 0 <= player.vel_x <= 2 * ACCELERATION
+    run(player, level, LEFT, frames=2)
+    assert player.vel_x < 0  # turns away straight off, with no built-up speed to cancel
 
 
 def test_no_keys_means_no_horizontal_movement(grounded, level):
@@ -159,11 +253,61 @@ def test_player_faces_the_way_it_last_moved(grounded, level):
     assert grounded.facing == 1
 
 
+def turn_per_frame(player, level, keys):
+    """Signed turn over one frame: positive is clockwise."""
+    before = player.angle
+    run(player, level, keys)
+    return (player.angle - before + math.pi) % math.tau - math.pi
+
+
+@pytest.mark.parametrize("keys, sign", [(RIGHT, 1), (LEFT, -1)])
+def test_rolls_clockwise_moving_right_and_anticlockwise_moving_left(long_floor, keys, sign):
+    player, level = long_floor
+    run(player, level, keys, frames=20)
+    assert turn_per_frame(player, level, keys) * sign > 0
+
+
+def test_rolls_like_a_ball_one_turn_per_circumference(long_floor):
+    player, level = long_floor
+    run(player, level, RIGHT, frames=20)
+    start_x, start_angle = player.x, player.angle
+    run(player, level, RIGHT, frames=3)
+    turned = (player.angle - start_angle) % math.tau
+    assert turned == pytest.approx((player.x - start_x) / (PLAYER_SIZE / 2))
+
+
+def test_does_not_roll_while_standing_still(grounded, level):
+    angle = grounded.angle
+    run(grounded, level, frames=20)
+    assert grounded.angle == angle
+
+
+def test_does_not_roll_when_pushing_against_a_wall():
+    level = Level([
+        "......",
+        ".P..#.",
+        "######",
+    ])
+    player = Player(*level.start)
+    run(player, level, RIGHT, frames=60)  # now pressed against the wall
+    angle = player.angle
+    run(player, level, RIGHT, frames=20)
+    assert player.angle == pytest.approx(angle, abs=0.1)
+
+
+def test_angle_stays_within_one_turn(long_floor):
+    player, level = long_floor
+    run(player, level, RIGHT, frames=200)
+    assert 0 <= player.angle < math.tau
+
+
 def test_respawn_returns_to_start_and_stops(level):
     player = Player(*level.start)
     run(player, level, RIGHT, frames=20)
     player.vel_y = 10
     player.respawn()
     assert player.rect.topleft == level.start
+    assert player.x == level.start[0]
+    assert player.angle == 0  # upright again
     assert player.vel_x == 0
     assert player.vel_y == 0

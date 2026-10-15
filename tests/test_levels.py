@@ -1,9 +1,14 @@
-from collections import deque
-
 import pytest
 
-from conftest import LEFT, NO_KEYS, RIGHT
-from main import LEVELS, TILE, Game, Level
+from main import LEVELS, MOVE_SPEED, TILE, WIDTH, Game, Level
+from reachability import (
+    Surface,
+    can_reach_door,
+    find_surfaces,
+    jump_arc,
+    reach,
+    unreachable_coins,
+)
 
 LEVEL_IDS = [f"level{i}" for i in range(1, len(LEVELS) + 1)]
 
@@ -31,6 +36,11 @@ def test_there_are_at_least_three_levels():
 
 
 @pytest.mark.parametrize("layout", LEVELS, ids=LEVEL_IDS)
+def test_levels_are_at_least_three_screens_long(layout):
+    assert Level(layout).width >= 3 * WIDTH
+
+
+@pytest.mark.parametrize("layout", LEVELS, ids=LEVEL_IDS)
 def test_level_layout_is_well_formed(layout):
     text = "".join(layout)
     assert set(text) <= set(".#PDC"), "unknown character in layout"
@@ -47,84 +57,38 @@ def test_player_does_not_start_on_the_door(layout):
     assert not game.player.rect.colliderect(level.door)
 
 
-def can_finish(layout):
-    """Whether the door can be reached."""
-    return search(Game([layout]), lambda game: game.won)
-
-
-def can_collect(layout, coin_index):
-    """Whether one particular coin can be reached (the level's other coins are removed)."""
-    rows = [[] for _ in layout]
-    seen_coins = 0
-    for r, line in enumerate(layout):
-        for char in line:
-            if char == "C":
-                char = "C" if seen_coins == coin_index else "."
-                seen_coins += 1
-            rows[r].append(char)
-    game = Game([["".join(row) for row in rows]])
-    return search(game, lambda game: game.coins_collected == 1)
-
-
-def search(game, goal, max_states=200_000):
-    """Search every combination of left/right/none and jump, using the real game rules,
-    to see whether goal(game) can be made true."""
-    for _ in range(30):
-        game.update(NO_KEYS)
-    p = game.player
-    start = (p.rect.x, p.rect.y, p.vel_y, p.on_ground)
-    seen, queue = {start}, deque([start])
-    while queue and len(seen) < max_states:
-        x, y, vel_y, on_ground = queue.popleft()
-        for jump in (False, True) if on_ground else (False,):
-            for keys in (NO_KEYS, LEFT, RIGHT):
-                p.rect.topleft, p.vel_y, p.on_ground = (x, y), vel_y, on_ground
-                if jump:
-                    game.jump_pressed()
-                game.update(keys)
-                if goal(game):
-                    return True
-                if game.won:
-                    # Reached the door while looking for something else: a dead end.
-                    game.won = False
-                    continue
-                state = (p.rect.x, p.rect.y, round(p.vel_y, 2), p.on_ground)
-                if state not in seen:
-                    seen.add(state)
-                    queue.append(state)
-    return False
+@pytest.mark.parametrize("layout", LEVELS, ids=LEVEL_IDS)
+def test_every_level_can_be_finished(layout):
+    assert can_reach_door(layout)
 
 
 @pytest.mark.parametrize("layout", LEVELS, ids=LEVEL_IDS)
-def test_every_level_can_be_finished(layout):
-    assert can_finish(layout)
+def test_every_coin_can_be_collected(layout):
+    assert unreachable_coins(layout) == []
 
 
-COINS = [
-    pytest.param(layout, index, id=f"level{level}-coin{index + 1}")
-    for level, layout in enumerate(LEVELS, 1)
-    for index in range("".join(layout).count("C"))
-]
+# The checker itself: it must say no to levels that really can't be done.
+
+def test_finds_platform_surfaces():
+    surfaces = find_surfaces([
+        "......",
+        ".##...",
+        "....##",
+        "######",
+    ])
+    assert Surface(1 * TILE, 3 * TILE, 1 * TILE) in surfaces
+    assert Surface(4 * TILE, 6 * TILE, 2 * TILE) in surfaces
+    assert Surface(0, 4 * TILE, 3 * TILE) in surfaces  # floor under the open part only
+    assert len(surfaces) == 3
 
 
-@pytest.mark.parametrize("layout, coin_index", COINS)
-def test_every_coin_can_be_collected(layout, coin_index):
-    assert can_collect(layout, coin_index)
+def test_running_start_jumps_further_than_standing_jump():
+    standing = reach(jump_arc(0), 0)
+    running = reach(jump_arc(MOVE_SPEED), 0)
+    assert running > standing > 0
 
 
-def test_solver_detects_an_unreachable_coin():
-    sealed = [
-        "#####",
-        "#C#..",
-        "###..",
-        "...P.",
-        "#####",
-    ]
-    assert not can_collect(sealed, 0)
-
-
-def test_solver_detects_an_impossible_level():
-    # Door on a ledge far too high to jump to.
+def test_detects_a_door_too_high_to_reach():
     impossible = [
         ".......D",
         ".....###",
@@ -135,4 +99,36 @@ def test_solver_detects_an_impossible_level():
         ".P......",
         "########",
     ]
-    assert not can_finish(impossible)
+    assert not can_reach_door(impossible)
+
+
+def test_detects_a_gap_too_wide_to_jump():
+    impossible = [
+        "........................",
+        ".P....................D.",
+        "####..............######",
+    ]
+    assert not can_reach_door(impossible)
+
+
+def test_reaches_a_door_across_a_small_gap():
+    possible = [
+        "............",
+        ".P........D.",
+        "#####..#####",
+    ]
+    assert can_reach_door(possible)
+
+
+def test_detects_a_coin_too_high_to_reach():
+    level = [
+        "....C...",
+        "........",
+        "........",
+        "........",
+        "........",
+        "........",
+        ".P....D.",
+        "########",
+    ]
+    assert unreachable_coins(level) == [Level(level).coins[0].center]
