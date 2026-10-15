@@ -45,9 +45,21 @@ HEART_EDGE = (60, 20, 30)
 MAX_HEALTH = 3  # hearts at the start of every level
 INVINCIBLE_FRAMES = 60  # after a hit the player flashes and can't be hurt for this long
 
+# Enemies
+ENEMY = (140, 70, 190)
+ENEMY_EDGE = (85, 35, 125)
+ENEMY_BROW = (40, 15, 60)
+ENEMY_WIDTH, ENEMY_HEIGHT = 32, 26
+ENEMY_SPEED = 1.5
+STOMP_BOUNCE = 9  # upward speed after landing on an enemy (holding jump gives a full jump)
+KNOCKBACK_SPEED = MOVE_SPEED  # sideways speed when hurt by an enemy
+KNOCKBACK_HOP = 6  # small upward speed when hurt, to break contact
+
+JUMP_KEYS = (pygame.K_SPACE, pygame.K_UP, pygame.K_w)
+
 # Level layouts: "#" is a solid tile, "P" is the player start, "D" is the door
 # to the next level (it is two tiles tall, drawn upward from its cell), "C" is a coin,
-# "." is empty.
+# "E" is an enemy (it patrols the platform it stands on), "." is empty.
 LEVELS = [
     # Level 1: gaps to jump, a raised block, and stepping stones over wide pits.
     # Coins: over the first pit at the top of a jump, on a ledge back from the floating
@@ -63,7 +75,7 @@ LEVELS = [
         ".........C.......##....................................##..................................###..........................",
         "........................................................................................................................",
         ".....................###.......................######.........##.....................####...............................",
-        ".P.............................................######................................####...............##...........D..",
+        ".P..............E..............................######...................E.......E....####...............##......E....D..",
         "########...#########......####.#############...######...#####.....#######################........######....#############",
         "########...#########......#C...#############...######...#####.....#######################........######....#############",
         "########...#########......##################...######...#####.....#######################........######....#############",
@@ -82,7 +94,7 @@ LEVELS = [
         "..##.........###.....###.........................................###..........###.....................................................................",
         ".........................###...........###..................................................................................###.......................",
         "........###................................................###.......................###..............................###...###.......................",
-        ".P........................................................................................................#...........###...###....................D..",
+        ".P................................................E..............................................E........#......E....###...###.............E......D..",
         "######.....................................#############...................................#############......######..###...###....###################",
         "######.....................................#############...................................#############......######..###...###....###################",
         "######.....................................#############...................................#############......######..###...###....###################",
@@ -96,7 +108,7 @@ LEVELS = [
         "..........................................................................................",
         "..........................................................................................",
         "............###...###......................###............................................",
-        ".C........................................................................................",
+        ".C.............................E..........................................................",
         "........................##########...###.........###......................................",
         "......####................................................................................",
         ".......................................................###................................",
@@ -108,7 +120,7 @@ LEVELS = [
         ".........................................................................###..............",
         "......###.................................................................................",
         "...............................................................................###........",
-        ".P..........................C...........................................................D.",
+        ".P.............E............C.........................................................E.D.",
         "##############################......................................................######",
         "##############################......................................................######",
         "##############################......................................................######",
@@ -197,16 +209,45 @@ class Player:
             self.vel_y = -JUMP_SPEED / 3
 
 
+class Enemy:
+    """A blob that patrols its platform, turning around at walls and edges."""
+
+    def __init__(self, x, y):
+        # Stands on the floor of the tile cell whose top-left is (x, y).
+        self.rect = pygame.Rect(0, 0, ENEMY_WIDTH, ENEMY_HEIGHT)
+        self.rect.midbottom = (x + TILE // 2, y + TILE)
+        self.x = float(self.rect.x)
+        self.direction = -1  # 1 is right, -1 is left
+
+    def update(self, level):
+        step = ENEMY_SPEED * self.direction
+        self.x += step
+        self.rect.x = round(self.x)
+        front = self.rect.right if self.direction > 0 else self.rect.left - 1
+        wall = level.solid_at(front, self.rect.centery)
+        edge = not level.solid_at(front, self.rect.bottom + 1)
+        outside = self.rect.left < 0 or self.rect.right > level.width
+        if wall or edge or outside:
+            self.x -= step
+            self.rect.x = round(self.x)
+            self.direction = -self.direction
+
+
 class Level:
     def __init__(self, layout):
         self.tiles = []
+        self.solid = set()  # (col, row) of every solid tile
         self.start = (TILE, TILE)
         self.door = None
         self.coins = []
+        self.enemies = []
         for row, line in enumerate(layout):
             for col, char in enumerate(line):
                 if char == "#":
                     self.tiles.append(pygame.Rect(col * TILE, row * TILE, TILE, TILE))
+                    self.solid.add((col, row))
+                elif char == "E":
+                    self.enemies.append(Enemy(col * TILE, row * TILE))
                 elif char == "P":
                     self.start = (col * TILE, row * TILE)
                 elif char == "D":
@@ -217,6 +258,10 @@ class Level:
                     self.coins.append(coin)
         self.width = max(len(line) for line in layout) * TILE
         self.height = len(layout) * TILE
+
+    def solid_at(self, x, y):
+        """Whether the pixel (x, y) is inside a solid tile."""
+        return (x // TILE, y // TILE) in self.solid
 
 
 class Game:
@@ -272,6 +317,9 @@ class Game:
         player, level = self.player, self.level
         if self.invincible:
             self.invincible -= 1
+        for enemy in level.enemies:
+            enemy.update(level)
+        feet_before = player.rect.bottom  # to tell a stomp from a side hit
         player.update(keys, level.tiles)
 
         # Keep the player inside the level horizontally.
@@ -287,6 +335,20 @@ class Game:
             self.damage(ignore_invincibility=True)
             if self.level is not level:  # that was the last heart: the level restarted
                 return
+
+        # Enemies: landing on top defeats them, touching them any other way hurts.
+        for enemy in [e for e in level.enemies if player.rect.colliderect(e.rect)]:
+            if player.vel_y > 0 and feet_before <= enemy.rect.top:
+                level.enemies.remove(enemy)
+                player.rect.bottom = enemy.rect.top
+                jump_held = any(keys[key] for key in JUMP_KEYS)
+                player.vel_y = -JUMP_SPEED if jump_held else -STOMP_BOUNCE
+            elif self.damage():
+                if self.level is not level:  # that was the last heart: the level restarted
+                    return
+                away = 1 if player.rect.centerx >= enemy.rect.centerx else -1
+                player.vel_x = away * KNOCKBACK_SPEED
+                player.vel_y = -KNOCKBACK_HOP
 
         # Collected coins stay collected, even if the player falls and respawns.
         for coin in [c for c in level.coins if player.rect.colliderect(c)]:
@@ -332,6 +394,23 @@ def draw_player(screen, rect, facing, angle=0.0):
     pygame.draw.lines(screen, MOUTH, False, smile, 2)
 
 
+def draw_enemy(screen, rect, direction):
+    """A purple blob: rounded on top, flat on the bottom, with angry eyes."""
+    pygame.draw.rect(screen, ENEMY_EDGE, rect, border_top_left_radius=16,
+                     border_top_right_radius=16, border_bottom_left_radius=4, border_bottom_right_radius=4)
+    pygame.draw.rect(screen, ENEMY, rect.inflate(-4, -4), border_top_left_radius=14,
+                     border_top_right_radius=14, border_bottom_left_radius=3, border_bottom_right_radius=3)
+    cx = rect.centerx + direction * 2
+    eye_y = rect.top + 11
+    for side in (-1, 1):
+        eye = (cx + side * 6, eye_y)
+        pygame.draw.circle(screen, EYE_WHITE, eye, 4)
+        pygame.draw.circle(screen, EYE_PUPIL, (eye[0] + direction * 1, eye[1] + 1), 2)
+        # Eyebrows slope down towards the middle.
+        outer, inner = (eye[0] + side * 5, eye[1] - 7), (eye[0] - side * 2, eye[1] - 4)
+        pygame.draw.line(screen, ENEMY_BROW, outer, inner, 2)
+
+
 def draw_coin(screen, center, radius=COIN_SIZE // 2):
     pygame.draw.circle(screen, COIN_EDGE, center, radius)
     pygame.draw.circle(screen, COIN, center, radius - 2)
@@ -371,7 +450,6 @@ def main():
     clock = pygame.time.Clock()
     font = pygame.font.Font(None, 36)
     big_font = pygame.font.Font(None, 80)
-    jump_keys = (pygame.K_SPACE, pygame.K_UP, pygame.K_w)
     game = Game()
 
     running = True
@@ -384,9 +462,9 @@ def main():
                     running = False
                 elif game.won and event.key == pygame.K_RETURN:
                     game.restart()
-                elif event.key in jump_keys:
+                elif event.key in JUMP_KEYS:
                     game.jump_pressed()
-            elif event.type == pygame.KEYUP and event.key in jump_keys:
+            elif event.type == pygame.KEYUP and event.key in JUMP_KEYS:
                 game.jump_released()
 
         if game.won:
@@ -417,6 +495,8 @@ def main():
             draw_door(screen, level.door.move(-cam_x, -cam_y))
         for coin in level.coins:
             draw_coin(screen, coin.move(-cam_x, -cam_y).center)
+        for enemy in level.enemies:
+            draw_enemy(screen, enemy.rect.move(-cam_x, -cam_y), enemy.direction)
         # Flash while invincible: hidden for 5 frames out of every 10.
         if not game.invincible or (game.invincible // 5) % 2 == 0:
             draw_player(screen, player.rect.move(-cam_x, -cam_y), player.facing, player.angle)

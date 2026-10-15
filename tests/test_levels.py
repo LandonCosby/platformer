@@ -43,11 +43,37 @@ def test_levels_are_at_least_three_screens_long(layout):
 @pytest.mark.parametrize("layout", LEVELS, ids=LEVEL_IDS)
 def test_level_layout_is_well_formed(layout):
     text = "".join(layout)
-    assert set(text) <= set(".#PDC"), "unknown character in layout"
+    assert set(text) <= set(".#PDCE"), "unknown character in layout"
     assert text.count("C") >= 1, "every level should have at least one coin"
     assert text.count("P") == 1, "needs exactly one player start"
     assert text.count("D") == 1, "needs exactly one door"
     assert len({len(row) for row in layout}) == 1, "all rows should be the same length"
+
+
+@pytest.mark.parametrize("layout", LEVELS, ids=LEVEL_IDS)
+def test_every_level_has_enemies(layout):
+    assert 3 <= "".join(layout).count("E") <= 4
+
+
+def enemy_cells(layout):
+    return [(r, c) for r, line in enumerate(layout) for c, ch in enumerate(line) if ch == "E"]
+
+
+@pytest.mark.parametrize("layout", LEVELS, ids=LEVEL_IDS)
+def test_enemies_stand_on_a_platform_with_room_to_patrol(layout):
+    for r, c in enemy_cells(layout):
+        assert layout[r + 1][c] == "#", f"enemy at row {r}, col {c} has no ground under it"
+        room = sum(1 for cc in (c - 1, c + 1) if layout[r + 1][cc] == "#" and layout[r][cc] != "#")
+        assert room >= 1, f"enemy at row {r}, col {c} has nowhere to walk"
+
+
+@pytest.mark.parametrize("layout", LEVELS, ids=LEVEL_IDS)
+def test_enemies_are_not_next_to_the_start(layout):
+    text_rows = [line.find("P") for line in layout]
+    start_row = next(r for r, c in enumerate(text_rows) if c >= 0)
+    start_col = text_rows[start_row]
+    for r, c in enemy_cells(layout):
+        assert abs(c - start_col) >= 5 or abs(r - start_row) >= 3
 
 
 @pytest.mark.parametrize("layout", LEVELS, ids=LEVEL_IDS)

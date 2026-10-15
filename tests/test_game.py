@@ -1,9 +1,9 @@
 import pygame
 import pytest
 
-from conftest import LEFT, NO_KEYS, RIGHT
+from conftest import LEFT, NO_KEYS, RIGHT, Keys
 import main
-from main import LEVELS, TILE, Game
+from main import ENEMY_WIDTH, LEVELS, TILE, Game, Level
 
 # Small levels where walking right reaches the door quickly.
 SHORT = [
@@ -266,6 +266,114 @@ def test_restart_after_winning_gives_full_health():
     walk_right_until_level_changes(game)
     game.restart()
     assert game.health == main.MAX_HEALTH
+
+
+ENEMY_AHEAD = [
+    "............",
+    ".P.......E..",
+    "############",
+]
+ENEMY_BELOW = [
+    "......",
+    "...P..",
+    "......",
+    "...E..",
+    "######",
+]
+JUMP_HELD = Keys({pygame.K_SPACE: True})
+
+
+def run_until(game, keys, done, frames=200):
+    for _ in range(frames):
+        game.update(keys)
+        if done():
+            return True
+    return False
+
+
+def test_enemy_hurts_when_touched_from_the_side():
+    game = Game([ENEMY_AHEAD])
+    assert run_until(game, RIGHT, lambda: game.health < main.MAX_HEALTH)
+    assert game.health == 2
+    assert len(game.level.enemies) == 1  # the enemy survives
+
+
+def test_side_hit_knocks_the_player_away():
+    game = Game([ENEMY_AHEAD])
+    run_until(game, RIGHT, lambda: game.health < main.MAX_HEALTH)
+    assert game.player.vel_x < 0  # pushed back left, away from the enemy
+    assert game.player.vel_y < 0  # with a small hop
+    assert game.player.rect.centerx < game.level.enemies[0].rect.centerx
+
+
+def test_landing_on_an_enemy_defeats_it_without_damage():
+    game = Game([ENEMY_BELOW])
+    assert run_until(game, NO_KEYS, lambda: not game.level.enemies)
+    assert game.health == main.MAX_HEALTH
+    assert game.player.vel_y == -main.STOMP_BOUNCE  # bounced up
+
+
+def test_holding_jump_bounces_higher_off_an_enemy():
+    game = Game([ENEMY_BELOW])
+    assert run_until(game, JUMP_HELD, lambda: not game.level.enemies)
+    assert game.player.vel_y == -main.JUMP_SPEED
+
+
+def test_no_side_damage_while_invincible():
+    game = Game([ENEMY_AHEAD])
+    game.damage()
+    health = game.health
+    run_until(game, RIGHT, lambda: game.player.rect.colliderect(game.level.enemies[0].rect))
+    game.update(RIGHT)
+    assert game.health == health
+
+
+def test_enemy_taking_the_last_heart_restarts_the_level():
+    game = Game([ENEMY_AHEAD])
+    game.damage(2)
+    game.invincible = 0
+    first_try = game.level
+    assert run_until(game, RIGHT, lambda: game.level is not first_try)
+    assert game.health == main.MAX_HEALTH
+    assert game.player.rect.topleft == game.level.start
+
+
+def test_defeated_enemies_come_back_when_the_level_restarts():
+    game = Game([ENEMY_BELOW])
+    run_until(game, NO_KEYS, lambda: not game.level.enemies)
+    game.damage(3)
+    assert len(game.level.enemies) == 1
+
+
+def test_enemy_patrols_and_turns_at_platform_edges():
+    level = Level([
+        "..........",
+        ".....E....",
+        "...####...",
+        "..........",
+    ])
+    enemy = level.enemies[0]
+    lefts, directions = [], set()
+    for _ in range(300):
+        enemy.update(level)
+        lefts.append(enemy.rect.left)
+        directions.add(enemy.direction)
+    assert directions == {-1, 1}  # turned around
+    assert min(lefts) >= 3 * TILE and max(lefts) + ENEMY_WIDTH <= 7 * TILE  # never left the platform
+
+
+def test_enemy_turns_at_walls():
+    level = Level([
+        "..........",
+        ".#..E..#..",
+        "##########",
+    ])
+    enemy = level.enemies[0]
+    lefts = []
+    for _ in range(300):
+        enemy.update(level)
+        lefts.append(enemy.rect.left)
+    assert min(lefts) >= 2 * TILE and max(lefts) + ENEMY_WIDTH <= 7 * TILE
 
 
 def test_jump_controls_reach_the_player():
